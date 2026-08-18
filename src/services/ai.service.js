@@ -3,6 +3,11 @@ const { z } = require("zod");
 const { zodToJsonSchema } = require("zod-to-json-schema");
 const puppeteer = require("puppeteer");
 
+
+// =====================================================
+// GEMINI AI
+// =====================================================
+
 const ai = new GoogleGenAI({
     apiKey: process.env.GOOGLE_GENAI_API_KEY
 });
@@ -16,7 +21,9 @@ const interviewReportSchema = z.object({
 
     title: z.string(),
 
-    matchScore: z.number().min(0).max(100),
+    matchScore: z.number()
+        .min(0)
+        .max(100),
 
     technicalQuestions: z.array(
         z.object({
@@ -67,13 +74,15 @@ function sleep(ms) {
 
 
 // =====================================================
-// GEMINI GENERATION WITH RETRY + FALLBACK
+// GEMINI GENERATION WITH RETRY
 // =====================================================
 
 async function generateGeminiContent(prompt, options = {}) {
+
     const models = [
-    "gemini-3.6-flash"
-];
+        "gemini-2.5-flash"
+    ];
+
     let lastError = null;
 
     for (const model of models) {
@@ -97,7 +106,9 @@ Attempt: ${attempt}
                         contents: prompt,
 
                         config: {
-                            responseMimeType: "application/json",
+
+                            responseMimeType:
+                                "application/json",
 
                             ...(options.responseSchema
                                 ? {
@@ -126,7 +137,6 @@ Model: ${model}
 
 
                 return response;
-
 
             } catch (error) {
 
@@ -161,10 +171,6 @@ Model: ${model}
                     Number(error?.status);
 
 
-                // -----------------------------------------
-                // TEMPORARY ERRORS
-                // -----------------------------------------
-
                 const temporaryError =
                     status === 429 ||
                     status === 500 ||
@@ -179,10 +185,6 @@ Model: ${model}
 
                 }
 
-
-                // -----------------------------------------
-                // RETRY
-                // -----------------------------------------
 
                 if (attempt < 3) {
 
@@ -200,16 +202,13 @@ Model: ${model}
             }
         }
 
-
-        console.log(
-            `Model ${model} failed. Trying fallback model...`
-        );
     }
 
 
-    throw lastError || new Error(
-        "All Gemini models failed."
-    );
+    throw lastError ||
+        new Error(
+            "All Gemini models failed."
+        );
 }
 
 
@@ -234,6 +233,7 @@ async function generateInterviewReport({
 
 
     const prompt = `
+
 You are an expert technical interviewer and career coach.
 
 Analyze the candidate based on the following information.
@@ -270,29 +270,29 @@ Return ONLY valid JSON.
 Use exactly this structure:
 
 {
-  "job_role": "string",
+    "job_role": "string",
 
-  "match_score": 0,
+    "match_score": 0,
 
-  "technical_interview_questions": [
-    "string"
-  ],
+    "technical_interview_questions": [
+        "string"
+    ],
 
-  "behavioral_interview_questions": [
-    "string"
-  ],
+    "behavioral_interview_questions": [
+        "string"
+    ],
 
-  "missing_skills": [
-    "string"
-  ],
+    "missing_skills": [
+        "string"
+    ],
 
-  "skill_gap_severity": [
-    "low"
-  ],
+    "skill_gap_severity": [
+        "low"
+    ],
 
-  "preparation_plan": [
-    "Day 1: string"
-  ]
+    "preparation_plan": [
+        "Day 1: string"
+    ]
 }
 
 
@@ -310,6 +310,7 @@ RULES:
 - Make the questions realistic for an actual interview.
 - Make preparation steps practical.
 - Return ONLY JSON.
+
 `;
 
 
@@ -331,12 +332,14 @@ RULES:
 
 
         const result =
-            JSON.parse(response.text);
+            JSON.parse(
+                response.text
+            );
 
 
-        // =================================================
+        // =====================================================
         // TECHNICAL QUESTIONS
-        // =================================================
+        // =====================================================
 
         const technicalQuestions =
             (result.technical_interview_questions || [])
@@ -350,12 +353,13 @@ RULES:
 
                     answer:
                         "Explain the concept clearly, provide a practical example from your project experience, and describe how you would implement it."
+
                 }));
 
 
-        // =================================================
+        // =====================================================
         // BEHAVIORAL QUESTIONS
-        // =================================================
+        // =====================================================
 
         const behavioralQuestions =
             (result.behavioral_interview_questions || [])
@@ -369,12 +373,13 @@ RULES:
 
                     answer:
                         "Answer using a real project or academic example. Explain the situation, your action and the result."
+
                 }));
 
 
-        // =================================================
+        // =====================================================
         // SKILL GAPS
-        // =================================================
+        // =====================================================
 
         const skillGaps =
             (result.missing_skills || [])
@@ -400,14 +405,15 @@ RULES:
                             ].includes(severity)
                                 ? severity
                                 : "medium"
+
                     };
 
                 });
 
 
-        // =================================================
+        // =====================================================
         // PREPARATION PLAN
-        // =================================================
+        // =====================================================
 
         const preparationPlan =
             (result.preparation_plan || [])
@@ -460,9 +466,9 @@ RULES:
                 });
 
 
-        // =================================================
+        // =====================================================
         // FINAL REPORT
-        // =================================================
+        // =====================================================
 
         const interviewReport = {
 
@@ -486,9 +492,9 @@ RULES:
         };
 
 
-        // =================================================
+        // =====================================================
         // ZOD VALIDATION
-        // =================================================
+        // =====================================================
 
         const validatedReport =
             interviewReportSchema.parse(
@@ -590,8 +596,11 @@ async function generatePdfFromHtml(htmlContent) {
                 margin: {
 
                     top: "15mm",
+
                     bottom: "15mm",
+
                     left: "15mm",
+
                     right: "15mm"
 
                 }
@@ -611,6 +620,7 @@ async function generatePdfFromHtml(htmlContent) {
         }
 
     }
+
 }
 
 
@@ -636,6 +646,7 @@ async function generateResumePdf({
 }) {
 
     const prompt = `
+
 Create a professional ATS-friendly resume.
 
 ========================
@@ -676,6 +687,7 @@ REQUIREMENTS
 - Include projects and experience only when provided.
 - Return ONLY JSON.
 - JSON must contain one field named "html".
+
 `;
 
 
@@ -730,6 +742,7 @@ REQUIREMENTS
         );
 
     }
+
 }
 
 
