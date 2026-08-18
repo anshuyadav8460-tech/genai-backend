@@ -80,8 +80,8 @@ function sleep(ms) {
 async function generateGeminiContent(prompt, options = {}) {
 
     const models = [
-        "gemini-2.5-flash"
-    ];
+    "gemini-3.6-flash"
+];;
 
     let lastError = null;
 
