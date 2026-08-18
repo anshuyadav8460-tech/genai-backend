@@ -20,35 +20,31 @@ async function generateInterViewReportController(
 
     try {
 
-        console.log("");
-        console.log("==============================================");
-        console.log("GENERATE INTERVIEW REPORT REQUEST");
-        console.log("==============================================");
-
-
-        // =================================================
-        // 1. AUTHENTICATION
-        // =================================================
-
         console.log(
-            "STEP 1: Checking user..."
+            "\n=============================================="
         );
 
+        console.log(
+            "🔥 INTERVIEW POST ROUTE HIT"
+        );
+
+        console.log(
+            "=============================================="
+        );
+
+
+        // =================================================
+        // AUTH
+        // =================================================
 
         if (
             !req.user ||
             !req.user.id
         ) {
 
-            console.log(
-                "❌ USER NOT AUTHENTICATED"
-            );
-
-
             return res.status(401).json({
 
-                success:
-                    false,
+                success: false,
 
                 message:
                     "User authentication required."
@@ -65,28 +61,32 @@ async function generateInterViewReportController(
 
 
         // =================================================
-        // 2. REQUEST BODY
+        // REQUEST BODY
         // =================================================
 
-        console.log(
-            "STEP 2: Reading request body..."
-        );
-
-
         const {
+
             selfDescription = "",
+
             jobDescription = ""
+
         } = req.body || {};
 
 
-        // =================================================
-        // 3. VALIDATE JOB DESCRIPTION
-        // =================================================
-
         console.log(
-            "STEP 3: Validating job description..."
+            "JOB DESCRIPTION LENGTH:",
+            jobDescription.length
         );
 
+        console.log(
+            "SELF DESCRIPTION LENGTH:",
+            selfDescription.length
+        );
+
+
+        // =================================================
+        // VALIDATE JOB DESCRIPTION
+        // =================================================
 
         if (
             typeof jobDescription !== "string" ||
@@ -95,8 +95,7 @@ async function generateInterViewReportController(
 
             return res.status(400).json({
 
-                success:
-                    false,
+                success: false,
 
                 message:
                     "Job description is required."
@@ -107,13 +106,8 @@ async function generateInterViewReportController(
 
 
         // =================================================
-        // 4. READ RESUME
+        // READ RESUME
         // =================================================
-
-        console.log(
-            "STEP 4: Checking resume..."
-        );
-
 
         let resumeText = "";
 
@@ -121,14 +115,8 @@ async function generateInterViewReportController(
         if (req.file) {
 
             console.log(
-                "Resume received:",
+                "RESUME:",
                 req.file.originalname
-            );
-
-
-            console.log(
-                "Resume size:",
-                req.file.size
             );
 
 
@@ -151,17 +139,11 @@ async function generateInterViewReportController(
 
 
                 resumeText =
-                    resumeContent?.text ||
-                    "";
+                    resumeContent?.text || "";
 
 
                 console.log(
-                    "Resume text extracted successfully."
-                );
-
-
-                console.log(
-                    "Resume text length:",
+                    "RESUME TEXT LENGTH:",
                     resumeText.length
                 );
 
@@ -169,70 +151,42 @@ async function generateInterViewReportController(
             } catch (pdfError) {
 
                 console.error(
-                    "❌ PDF PARSING ERROR:"
-                );
-
-
-                console.error(
+                    "❌ PDF PARSING ERROR:",
                     pdfError
                 );
 
 
                 return res.status(400).json({
 
-                    success:
-                        false,
+                    success: false,
 
                     message:
                         "Failed to read the uploaded resume.",
 
                     error:
-                        pdfError?.message ||
-                        "PDF parsing failed."
+                        pdfError?.message
 
                 });
 
             }
 
-        } else {
-
-            console.log(
-                "No resume uploaded."
-            );
-
         }
 
 
         // =================================================
-        // 5. VALIDATE CANDIDATE DATA
+        // VALIDATE CANDIDATE
         // =================================================
 
-        console.log(
-            "STEP 5: Validating candidate information..."
-        );
-
-
-        const cleanSelfDescription =
-            typeof selfDescription === "string"
-                ? selfDescription.trim()
-                : "";
-
-
-        const cleanResume =
-            typeof resumeText === "string"
-                ? resumeText.trim()
-                : "";
-
-
         if (
-            !cleanResume &&
-            !cleanSelfDescription
+            !resumeText.trim() &&
+            !String(
+                selfDescription
+            ).trim()
         ) {
 
             return res.status(400).json({
 
-                success:
-                    false,
+                success: false,
 
                 message:
                     "Please upload your resume or provide self description."
@@ -243,47 +197,169 @@ async function generateInterViewReportController(
 
 
         // =================================================
-        // 6. CALL AI
+        // CALL GEMINI
         // =================================================
 
         console.log(
-            "STEP 6: Calling Gemini AI..."
+            "🤖 CALLING GEMINI..."
         );
 
 
-        const aiReport =
-            await generateInterviewReport({
-
-                resume:
-                    cleanResume,
-
-                selfDescription:
-                    cleanSelfDescription,
-
-                jobDescription:
-                    jobDescription.trim()
-
-            });
+        let aiReport;
 
 
-        console.log(
-            "STEP 7: Gemini response received."
-        );
+        try {
+
+            aiReport =
+                await generateInterviewReport({
+
+                    resume:
+                        resumeText,
+
+                    selfDescription:
+                        String(
+                            selfDescription
+                        ),
+
+                    jobDescription:
+                        jobDescription.trim()
+
+                });
 
 
-        // =================================================
-        // 7. SAFETY CHECK
-        // =================================================
+        } catch (aiError) {
 
-        if (!aiReport) {
+            console.error(
+                "❌ GEMINI FAILED"
+            );
 
-            return res.status(500).json({
+            console.error(
+                "STATUS:",
+                aiError?.status
+            );
 
-                success:
-                    false,
+            console.error(
+                "CODE:",
+                aiError?.code
+            );
+
+            console.error(
+                "MESSAGE:",
+                aiError?.message
+            );
+
+
+            // =================================================
+            // GEMINI QUOTA
+            // =================================================
+
+            if (
+                aiError?.code ===
+                "GEMINI_QUOTA_EXCEEDED"
+            ) {
+
+                return res.status(429).json({
+
+                    success: false,
+
+                    code:
+                        "GEMINI_QUOTA_EXCEEDED",
+
+                    message:
+                        "AI free quota is currently exhausted. Please try again after the quota resets."
+
+                });
+
+            }
+
+
+            // =================================================
+            // GEMINI API KEY
+            // =================================================
+
+            if (
+                aiError?.code ===
+                "GEMINI_API_KEY_MISSING"
+            ) {
+
+                return res.status(500).json({
+
+                    success: false,
+
+                    code:
+                        "GEMINI_API_KEY_MISSING",
+
+                    message:
+                        "Gemini API key is not configured on the server."
+
+                });
+
+            }
+
+
+            // =================================================
+            // GEMINI AUTH
+            // =================================================
+
+            if (
+                aiError?.code ===
+                "GEMINI_AUTH_ERROR"
+            ) {
+
+                return res.status(401).json({
+
+                    success: false,
+
+                    code:
+                        "GEMINI_AUTH_ERROR",
+
+                    message:
+                        "Gemini API authentication failed."
+
+                });
+
+            }
+
+
+            // =================================================
+            // MODEL ERROR
+            // =================================================
+
+            if (
+                aiError?.code ===
+                "GEMINI_MODEL_ERROR"
+            ) {
+
+                return res.status(503).json({
+
+                    success: false,
+
+                    code:
+                        "GEMINI_MODEL_ERROR",
+
+                    message:
+                        "The configured Gemini model is currently unavailable."
+
+                });
+
+            }
+
+
+            // =================================================
+            // OTHER AI ERROR
+            // =================================================
+
+            return res.status(502).json({
+
+                success: false,
+
+                code:
+                    aiError?.code ||
+                    "GEMINI_ERROR",
 
                 message:
-                    "AI failed to generate interview report."
+                    aiError?.message ||
+                    "AI service failed to generate the interview report."
 
             });
 
@@ -291,7 +367,25 @@ async function generateInterViewReportController(
 
 
         // =================================================
-        // 8. CLEAN REPORT DATA
+        // CHECK REPORT
+        // =================================================
+
+        if (!aiReport) {
+
+            return res.status(502).json({
+
+                success: false,
+
+                message:
+                    "AI returned an empty interview report."
+
+            });
+
+        }
+
+
+        // =================================================
+        // NORMALIZE DATA
         // =================================================
 
         const title =
@@ -359,11 +453,11 @@ async function generateInterViewReportController(
 
 
         // =================================================
-        // 9. SAVE TO DATABASE
+        // SAVE TO MONGODB
         // =================================================
 
         console.log(
-            "STEP 8: Saving interview report to MongoDB..."
+            "💾 SAVING REPORT TO DATABASE..."
         );
 
 
@@ -376,10 +470,12 @@ async function generateInterViewReportController(
                 title,
 
                 resume:
-                    cleanResume,
+                    resumeText,
 
                 selfDescription:
-                    cleanSelfDescription,
+                    String(
+                        selfDescription
+                    ),
 
                 jobDescription:
                     jobDescription.trim(),
@@ -398,24 +494,18 @@ async function generateInterViewReportController(
 
 
         console.log(
-            "STEP 9: REPORT SAVED SUCCESSFULLY"
-        );
-
-
-        console.log(
-            "REPORT ID:",
+            "✅ REPORT SAVED:",
             interviewReport._id
         );
 
 
         // =================================================
-        // 10. RESPONSE
+        // RESPONSE
         // =================================================
 
         return res.status(201).json({
 
-            success:
-                true,
+            success: true,
 
             message:
                 "Interview report generated successfully.",
@@ -427,22 +517,12 @@ async function generateInterViewReportController(
 
     } catch (error) {
 
-        console.error("");
         console.error(
             "=============================================="
         );
 
         console.error(
-            "GENERATE INTERVIEW REPORT ERROR"
-        );
-
-        console.error(
-            "=============================================="
-        );
-
-        console.error(
-            "NAME:",
-            error?.name
+            "❌ INTERVIEW CONTROLLER ERROR"
         );
 
         console.error(
@@ -460,98 +540,19 @@ async function generateInterViewReportController(
             error?.code
         );
 
+        console.error(
+            "STACK:",
+            error?.stack
+        );
 
-        // =================================================
-        // GEMINI QUOTA ERROR
-        // =================================================
+        console.error(
+            "=============================================="
+        );
 
-        if (
-            Number(error?.status) === 429 ||
-            error?.code ===
-                "GEMINI_QUOTA_EXCEEDED"
-        ) {
-
-            console.error(
-                "❌ GEMINI QUOTA EXCEEDED"
-            );
-
-
-            return res.status(429).json({
-
-                success:
-                    false,
-
-                code:
-                    "GEMINI_QUOTA_EXCEEDED",
-
-                message:
-                    "Gemini AI free quota has been exhausted. Please try again after the quota resets."
-
-            });
-
-        }
-
-
-        // =================================================
-        // GEMINI AUTH ERROR
-        // =================================================
-
-        if (
-            Number(error?.status) === 401 ||
-            error?.code ===
-                "GEMINI_AUTH_ERROR"
-        ) {
-
-            return res.status(401).json({
-
-                success:
-                    false,
-
-                code:
-                    "GEMINI_AUTH_ERROR",
-
-                message:
-                    "Gemini API authentication failed. Please check GOOGLE_GENAI_API_KEY."
-
-            });
-
-        }
-
-
-        // =================================================
-        // GEMINI MODEL ERROR
-        // =================================================
-
-        if (
-            Number(error?.status) === 404 ||
-            error?.code ===
-                "GEMINI_MODEL_ERROR"
-        ) {
-
-            return res.status(500).json({
-
-                success:
-                    false,
-
-                code:
-                    "GEMINI_MODEL_ERROR",
-
-                message:
-                    "The configured Gemini model is not available for this API key."
-
-            });
-
-        }
-
-
-        // =================================================
-        // NORMAL ERROR
-        // =================================================
 
         return res.status(500).json({
 
-            success:
-                false,
+            success: false,
 
             message:
                 "Failed to generate interview report.",
@@ -578,15 +579,6 @@ async function getInterviewReportByIdController(
 
     try {
 
-        console.log(
-            "GET INTERVIEW REPORT BY ID"
-        );
-
-
-        // =================================================
-        // AUTH
-        // =================================================
-
         if (
             !req.user ||
             !req.user.id
@@ -594,8 +586,7 @@ async function getInterviewReportByIdController(
 
             return res.status(401).json({
 
-                success:
-                    false,
+                success: false,
 
                 message:
                     "User authentication required."
@@ -604,10 +595,6 @@ async function getInterviewReportByIdController(
 
         }
 
-
-        // =================================================
-        // ID
-        // =================================================
 
         const {
             interviewId
@@ -618,8 +605,7 @@ async function getInterviewReportByIdController(
 
             return res.status(400).json({
 
-                success:
-                    false,
+                success: false,
 
                 message:
                     "Interview report ID is required."
@@ -628,10 +614,6 @@ async function getInterviewReportByIdController(
 
         }
 
-
-        // =================================================
-        // FIND REPORT
-        // =================================================
 
         const interviewReport =
             await interviewReportModel.findOne({
@@ -649,8 +631,7 @@ async function getInterviewReportByIdController(
 
             return res.status(404).json({
 
-                success:
-                    false,
+                success: false,
 
                 message:
                     "Interview report not found."
@@ -660,14 +641,9 @@ async function getInterviewReportByIdController(
         }
 
 
-        // =================================================
-        // RESPONSE
-        // =================================================
-
         return res.status(200).json({
 
-            success:
-                true,
+            success: true,
 
             message:
                 "Interview report fetched successfully.",
@@ -676,26 +652,23 @@ async function getInterviewReportByIdController(
 
         });
 
-
     } catch (error) {
 
         console.error(
-            "GET INTERVIEW REPORT ERROR:",
+            "GET REPORT ERROR:",
             error
         );
 
 
         return res.status(500).json({
 
-            success:
-                false,
+            success: false,
 
             message:
                 "Failed to fetch interview report.",
 
             error:
-                error?.message ||
-                "Unknown server error."
+                error?.message
 
         });
 
@@ -715,15 +688,6 @@ async function getAllInterviewReportsController(
 
     try {
 
-        console.log(
-            "GET ALL INTERVIEW REPORTS"
-        );
-
-
-        // =================================================
-        // AUTH
-        // =================================================
-
         if (
             !req.user ||
             !req.user.id
@@ -731,8 +695,7 @@ async function getAllInterviewReportsController(
 
             return res.status(401).json({
 
-                success:
-                    false,
+                success: false,
 
                 message:
                     "User authentication required."
@@ -741,10 +704,6 @@ async function getAllInterviewReportsController(
 
         }
 
-
-        // =================================================
-        // FIND REPORTS
-        // =================================================
 
         const interviewReports =
             await interviewReportModel
@@ -775,14 +734,9 @@ async function getAllInterviewReportsController(
                 );
 
 
-        // =================================================
-        // RESPONSE
-        // =================================================
-
         return res.status(200).json({
 
-            success:
-                true,
+            success: true,
 
             message:
                 "Interview reports fetched successfully.",
@@ -791,26 +745,23 @@ async function getAllInterviewReportsController(
 
         });
 
-
     } catch (error) {
 
         console.error(
-            "GET ALL INTERVIEW REPORTS ERROR:",
+            "GET ALL REPORTS ERROR:",
             error
         );
 
 
         return res.status(500).json({
 
-            success:
-                false,
+            success: false,
 
             message:
                 "Failed to fetch interview reports.",
 
             error:
-                error?.message ||
-                "Unknown server error."
+                error?.message
 
         });
 
@@ -830,23 +781,6 @@ async function generateResumePdfController(
 
     try {
 
-        console.log(
-            "=============================================="
-        );
-
-        console.log(
-            "GENERATE RESUME PDF"
-        );
-
-        console.log(
-            "=============================================="
-        );
-
-
-        // =================================================
-        // AUTH
-        // =================================================
-
         if (
             !req.user ||
             !req.user.id
@@ -854,8 +788,7 @@ async function generateResumePdfController(
 
             return res.status(401).json({
 
-                success:
-                    false,
+                success: false,
 
                 message:
                     "User authentication required."
@@ -864,10 +797,6 @@ async function generateResumePdfController(
 
         }
 
-
-        // =================================================
-        // GET REPORT ID
-        // =================================================
 
         const {
             interviewReportId
@@ -878,8 +807,7 @@ async function generateResumePdfController(
 
             return res.status(400).json({
 
-                success:
-                    false,
+                success: false,
 
                 message:
                     "Interview report ID is required."
@@ -888,10 +816,6 @@ async function generateResumePdfController(
 
         }
 
-
-        // =================================================
-        // FIND REPORT
-        // =================================================
 
         const interviewReport =
             await interviewReportModel.findOne({
@@ -909,8 +833,7 @@ async function generateResumePdfController(
 
             return res.status(404).json({
 
-                success:
-                    false,
+                success: false,
 
                 message:
                     "Interview report not found."
@@ -920,45 +843,25 @@ async function generateResumePdfController(
         }
 
 
-        // =================================================
-        // DATA
-        // =================================================
-
-        const {
-
-            resume,
-
-            jobDescription,
-
-            selfDescription
-
-        } = interviewReport;
-
-
-        // =================================================
-        // AI PDF
-        // =================================================
-
         console.log(
-            "Calling AI for resume PDF..."
+            "🤖 GENERATING RESUME PDF..."
         );
 
 
         const pdfBuffer =
             await generateResumePdf({
 
-                resume,
+                resume:
+                    interviewReport.resume,
 
-                jobDescription,
+                jobDescription:
+                    interviewReport.jobDescription,
 
-                selfDescription
+                selfDescription:
+                    interviewReport.selfDescription
 
             });
 
-
-        // =================================================
-        // SEND PDF
-        // =================================================
 
         res.set({
 
@@ -979,105 +882,40 @@ async function generateResumePdfController(
     } catch (error) {
 
         console.error(
-            "=============================================="
+            "RESUME PDF ERROR:",
+            error
         );
 
-        console.error(
-            "RESUME PDF ERROR"
-        );
-
-        console.error(
-            "=============================================="
-        );
-
-        console.error(
-            "NAME:",
-            error?.name
-        );
-
-        console.error(
-            "MESSAGE:",
-            error?.message
-        );
-
-        console.error(
-            "STATUS:",
-            error?.status
-        );
-
-        console.error(
-            "CODE:",
-            error?.code
-        );
-
-
-        // =================================================
-        // QUOTA
-        // =================================================
 
         if (
-            Number(error?.status) === 429 ||
             error?.code ===
-                "GEMINI_QUOTA_EXCEEDED"
+            "GEMINI_QUOTA_EXCEEDED"
         ) {
 
             return res.status(429).json({
 
-                success:
-                    false,
+                success: false,
 
                 code:
                     "GEMINI_QUOTA_EXCEEDED",
 
                 message:
-                    "Gemini AI free quota has been exhausted. Please try again after the quota resets."
+                    "AI free quota is currently exhausted. Please try again after the quota resets."
 
             });
 
         }
 
-
-        // =================================================
-        // AUTH
-        // =================================================
-
-        if (
-            Number(error?.status) === 401 ||
-            error?.code ===
-                "GEMINI_AUTH_ERROR"
-        ) {
-
-            return res.status(401).json({
-
-                success:
-                    false,
-
-                code:
-                    "GEMINI_AUTH_ERROR",
-
-                message:
-                    "Gemini API authentication failed."
-
-            });
-
-        }
-
-
-        // =================================================
-        // NORMAL ERROR
-        // =================================================
 
         return res.status(500).json({
 
-            success:
-                false,
+            success: false,
 
             message:
                 "Failed to generate resume PDF.",
 
             error:
-                error?.message ||
-                "Unknown server error."
+                error?.message
 
         });
 
