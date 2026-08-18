@@ -189,10 +189,7 @@ function createGeminiError(error) {
 // GEMINI GENERATION
 // =====================================================
 
-async function generateGeminiContent(
-    prompt,
-    options = {}
-) {
+async function generateGeminiContent(prompt, options = {}) {
 
     if (!GEMINI_API_KEY) {
 
@@ -202,153 +199,294 @@ async function generateGeminiContent(
             );
 
         error.status = 500;
-
         error.code =
             "GEMINI_API_KEY_MISSING";
 
         throw error;
     }
 
+    const MAX_RETRIES = 3;
 
-    console.log(
-        "=============================================="
-    );
-
-    console.log(
-        "========== CALLING GEMINI =========="
-    );
-
-    console.log(
-        "MODEL:",
-        GEMINI_MODEL
-    );
-
-    console.log(
-        "=============================================="
-    );
-
-
-    try {
-
-        const response =
-            await ai.models.generateContent({
-
-                model:
-                    GEMINI_MODEL,
-
-                contents:
-                    prompt,
-
-                config: {
-
-                    responseMimeType:
-                        "application/json",
-
-                    ...(options.responseSchema
-                        ? {
-                            responseSchema:
-                                options.responseSchema
-                        }
-                        : {})
-
-                }
-
-            });
-
-
-        if (
-            !response ||
-            !response.text
-        ) {
-
-            const emptyError =
-                new Error(
-                    "Gemini returned an empty response."
-                );
-
-            emptyError.status = 502;
-
-            emptyError.code =
-                "GEMINI_EMPTY_RESPONSE";
-
-            throw emptyError;
-        }
-
+    for (
+        let attempt = 1;
+        attempt <= MAX_RETRIES;
+        attempt++
+    ) {
 
         console.log(
             "=============================================="
         );
 
         console.log(
-            "========== GEMINI SUCCESS =========="
+            "========== CALLING GEMINI =========="
         );
 
         console.log(
-            "=============================================="
-        );
-
-
-        return response;
-
-    } catch (error) {
-
-        console.error(
-            "=============================================="
-        );
-
-        console.error(
-            "========== GEMINI ERROR =========="
-        );
-
-        console.error(
             "MODEL:",
             GEMINI_MODEL
         );
 
-        console.error(
-            "STATUS:",
-            error?.status
+        console.log(
+            "ATTEMPT:",
+            `${attempt}/${MAX_RETRIES}`
         );
 
-        console.error(
-            "MESSAGE:",
-            error?.message
-        );
-
-        console.error(
+        console.log(
             "=============================================="
         );
 
+        try {
 
-        const cleanError =
-            createGeminiError(error);
+            const response =
+                await ai.models.generateContent({
+
+                    model:
+                        GEMINI_MODEL,
+
+                    contents:
+                        prompt,
+
+                    config: {
+
+                        responseMimeType:
+                            "application/json",
+
+                        ...(options.responseSchema
+                            ? {
+                                responseSchema:
+                                    options.responseSchema
+                            }
+                            : {})
+
+                    }
+
+                });
 
 
-        // -----------------------------------------
-        // IMPORTANT
-        // NO RETRY FOR 429
-        // -----------------------------------------
+            if (
+                !response ||
+                !response.text
+            ) {
 
-        if (
-            cleanError.code ===
-            "GEMINI_QUOTA_EXCEEDED"
-        ) {
+                const emptyError =
+                    new Error(
+                        "Gemini returned an empty response."
+                    );
+
+                emptyError.status = 502;
+
+                emptyError.code =
+                    "GEMINI_EMPTY_RESPONSE";
+
+                throw emptyError;
+            }
+
+
+            console.log(
+                "=============================================="
+            );
+
+            console.log(
+                "========== GEMINI SUCCESS =========="
+            );
+
+            console.log(
+                "=============================================="
+            );
+
+
+            return response;
+
+
+        } catch (error) {
+
+            const status =
+                Number(error?.status);
+
+            const message =
+                String(error?.message || "");
+
 
             console.error(
-                "❌ Gemini quota exceeded."
+                "=============================================="
             );
 
             console.error(
-                "❌ No retry will be attempted."
+                "========== GEMINI ERROR =========="
             );
 
+            console.error(
+                "MODEL:",
+                GEMINI_MODEL
+            );
+
+            console.error(
+                "STATUS:",
+                status
+            );
+
+            console.error(
+                "MESSAGE:",
+                message
+            );
+
+            console.error(
+                "=============================================="
+            );
+
+
+            // =========================================
+            // 429 - QUOTA
+            // =========================================
+
+            if (
+                status === 429 ||
+                message.includes(
+                    "RESOURCE_EXHAUSTED"
+                ) ||
+                message
+                    .toLowerCase()
+                    .includes(
+                        "quota exceeded"
+                    )
+            ) {
+
+                const quotaError =
+                    new Error(
+                        "Gemini quota has been exceeded. Please try again after the quota resets."
+                    );
+
+                quotaError.status = 429;
+
+                quotaError.code =
+                    "GEMINI_QUOTA_EXCEEDED";
+
+                console.error(
+                    "❌ Gemini quota exceeded."
+                );
+
+                console.error(
+                    "❌ No retry will be attempted."
+                );
+
+                throw quotaError;
+            }
+
+
+            // =========================================
+            // 401 - API KEY
+            // =========================================
+
+            if (status === 401) {
+
+                const authError =
+                    new Error(
+                        "Gemini API key is invalid or authentication failed."
+                    );
+
+                authError.status = 401;
+
+                authError.code =
+                    "GEMINI_AUTH_ERROR";
+
+                throw authError;
+            }
+
+
+            // =========================================
+            // 403 - PERMISSION
+            // =========================================
+
+            if (status === 403) {
+
+                const permissionError =
+                    new Error(
+                        "Gemini API access is not permitted for this API key."
+                    );
+
+                permissionError.status = 403;
+
+                permissionError.code =
+                    "GEMINI_PERMISSION_ERROR";
+
+                throw permissionError;
+            }
+
+
+            // =========================================
+            // 404 - MODEL
+            // =========================================
+
+            if (status === 404) {
+
+                const modelError =
+                    new Error(
+                        `Gemini model "${GEMINI_MODEL}" is unavailable.`
+                    );
+
+                modelError.status = 404;
+
+                modelError.code =
+                    "GEMINI_MODEL_ERROR";
+
+                throw modelError;
+            }
+
+
+            // =========================================
+            // 503 - TEMPORARILY UNAVAILABLE
+            // =========================================
+
+            if (status === 503) {
+
+                if (
+                    attempt < MAX_RETRIES
+                ) {
+
+                    const delay =
+                        attempt * 3000;
+
+                    console.log(
+                        `⚠️ Gemini is busy. Retrying in ${delay / 1000} seconds...`
+                    );
+
+
+                    await new Promise(
+                        resolve =>
+                            setTimeout(
+                                resolve,
+                                delay
+                            )
+                    );
+
+
+                    continue;
+                }
+
+
+                const unavailableError =
+                    new Error(
+                        "Gemini is temporarily unavailable. Please try again later."
+                    );
+
+                unavailableError.status =
+                    503;
+
+                unavailableError.code =
+                    "GEMINI_UNAVAILABLE";
+
+                throw unavailableError;
+            }
+
+
+            // =========================================
+            // OTHER ERROR
+            // =========================================
+
+            throw error;
         }
-
-
-        throw cleanError;
     }
 }
-
 
 // =====================================================
 // GENERATE INTERVIEW REPORT
