@@ -1,27 +1,31 @@
 const jwt = require("jsonwebtoken");
 const tokenBlacklistModel = require("../models/blacklist.model");
-const authMiddleware = require("../middlewares/auth.middleware")
 
 async function authUser(req, res, next) {
-    const token = req.cookies.token;
-
-    if (!token) {
-        return res.status(401).json({
-            message: "Token not provided"
-        });
-    }
-
-    const isTokenBlackListed = await tokenBlacklistModel.findOne({
-        token
-    });
-
-    if (isTokenBlackListed) {
-        return res.status(401).json({
-            message: "Token is invalid"
-        });
-    }
 
     try {
+
+        const token = req.cookies?.token;
+
+        console.log("========== AUTH MIDDLEWARE ==========");
+        console.log("COOKIE TOKEN EXISTS:", !!token);
+
+        if (!token) {
+            return res.status(401).json({
+                message: "Token not provided"
+            });
+        }
+
+        const isTokenBlackListed = await tokenBlacklistModel.findOne({
+            token
+        });
+
+        if (isTokenBlackListed) {
+            return res.status(401).json({
+                message: "Token is invalid"
+            });
+        }
+
         const decoded = jwt.verify(
             token,
             process.env.JWT_SECRET
@@ -29,13 +33,20 @@ async function authUser(req, res, next) {
 
         req.user = decoded;
 
+        console.log("AUTH SUCCESS:", req.user.id);
+
         next();
 
-    } catch (err) {
+    } catch (error) {
+
+        console.error("AUTH ERROR:", error.message);
+
         return res.status(401).json({
             message: "Invalid token"
         });
     }
 }
 
-module.exports = { authUser };
+module.exports = {
+    authUser
+};
