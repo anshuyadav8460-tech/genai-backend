@@ -5,36 +5,23 @@ const puppeteer = require("puppeteer");
 
 
 // =====================================================
-// GEMINI AI CONFIGURATION
+// GEMINI AI
 // =====================================================
 
-const API_KEY = process.env.GOOGLE_GENAI_API_KEY;
-
-const MODEL = "gemini-3.6-flash";
-
-
-// =====================================================
-// API KEY CHECK
-// =====================================================
-
-if (!API_KEY) {
-    console.error(
-        "❌ GOOGLE_GENAI_API_KEY is missing from environment variables."
-    );
-} else {
-    console.log(
-        "✅ GOOGLE_GENAI_API_KEY loaded successfully."
-    );
+if (!process.env.GOOGLE_GENAI_API_KEY) {
+    console.warn("⚠️ GOOGLE_GENAI_API_KEY is missing.");
 }
 
-
-// =====================================================
-// GEMINI CLIENT
-// =====================================================
-
 const ai = new GoogleGenAI({
-    apiKey: API_KEY
+    apiKey: process.env.GOOGLE_GENAI_API_KEY
 });
+
+
+// =====================================================
+// GEMINI MODEL
+// =====================================================
+
+const GEMINI_MODEL = "gemini-3.6-flash";
 
 
 // =====================================================
@@ -92,135 +79,10 @@ const interviewReportSchema = z.object({
 // =====================================================
 
 const resumePdfSchema = z.object({
+
     html: z.string()
+
 });
-
-
-// =====================================================
-// SLEEP
-// =====================================================
-
-function sleep(ms) {
-    return new Promise(resolve => {
-        setTimeout(resolve, ms);
-    });
-}
-
-
-// =====================================================
-// CLEAN GEMINI JSON
-// =====================================================
-
-function cleanJsonResponse(text) {
-
-    if (!text) {
-        throw new Error(
-            "Gemini returned an empty response."
-        );
-    }
-
-    let cleaned = String(text).trim();
-
-
-    // Remove ```json
-    if (cleaned.startsWith("```json")) {
-
-        cleaned = cleaned
-            .replace(/^```json\s*/i, "")
-            .replace(/\s*```$/i, "");
-
-    }
-
-
-    // Remove normal ```
-    else if (cleaned.startsWith("```")) {
-
-        cleaned = cleaned
-            .replace(/^```\s*/i, "")
-            .replace(/\s*```$/i, "");
-
-    }
-
-
-    return cleaned.trim();
-}
-
-
-// =====================================================
-// GEMINI ERROR MESSAGE
-// =====================================================
-
-function getGeminiErrorMessage(error) {
-
-    const status =
-        Number(
-            error?.status ||
-            error?.response?.status ||
-            0
-        );
-
-
-    const originalMessage =
-        error?.message ||
-        error?.response?.data?.error?.message ||
-        "Unknown Gemini API error.";
-
-
-    // 401
-    if (status === 401) {
-
-        return new Error(
-            "Gemini API authentication failed. Please check GOOGLE_GENAI_API_KEY."
-        );
-
-    }
-
-
-    // 403
-    if (status === 403) {
-
-        return new Error(
-            "Gemini API access is forbidden. Please check your Google AI API project permissions."
-        );
-
-    }
-
-
-    // 404
-    if (status === 404) {
-
-        return new Error(
-            `Gemini model "${MODEL}" is not available for this API project.`
-        );
-
-    }
-
-
-    // 429
-    if (status === 429) {
-
-        return new Error(
-            "Gemini free quota has been exceeded. Please wait until the quota resets and try again."
-        );
-
-    }
-
-
-    // 5xx
-    if (status >= 500 && status <= 599) {
-
-        return new Error(
-            "Gemini server is temporarily unavailable. Please try again later."
-        );
-
-    }
-
-
-    return new Error(
-        originalMessage
-    );
-
-}
 
 
 // =====================================================
@@ -232,305 +94,209 @@ async function generateGeminiContent(
     options = {}
 ) {
 
+    console.log("==============================================");
+    console.log("CALLING GEMINI");
+    console.log("MODEL:", GEMINI_MODEL);
+    console.log("==============================================");
+
+
     // -------------------------------------------------
     // API KEY CHECK
     // -------------------------------------------------
 
-    if (!API_KEY) {
+    if (!process.env.GOOGLE_GENAI_API_KEY) {
 
-        throw new Error(
-            "GOOGLE_GENAI_API_KEY is not configured."
+        const error = new Error(
+            "GOOGLE_GENAI_API_KEY is missing."
         );
 
+        error.status = 500;
+        error.code = "GEMINI_API_KEY_MISSING";
+
+        throw error;
     }
 
 
-    console.log(
-        "=============================================="
-    );
+    try {
 
-    console.log(
-        "========== CALLING GEMINI =========="
-    );
+        const response =
+            await ai.models.generateContent({
 
-    console.log(
-        "API KEY EXISTS:",
-        Boolean(API_KEY)
-    );
+                model: GEMINI_MODEL,
 
-    console.log(
-        "MODEL:",
-        MODEL
-    );
+                contents: prompt,
 
-    console.log(
-        "=============================================="
-    );
+                config: {
 
+                    responseMimeType:
+                        "application/json",
 
-    // -------------------------------------------------
-    // ONLY RETRY SERVER ERRORS
-    // NEVER RETRY 429
-    // -------------------------------------------------
+                    ...(options.responseSchema
+                        ? {
+                            responseSchema:
+                                options.responseSchema
+                        }
+                        : {})
 
-    const MAX_RETRIES = 2;
+                }
 
-    let lastError = null;
+            });
 
 
-    for (
-        let attempt = 1;
-        attempt <= MAX_RETRIES;
-        attempt++
-    ) {
+        // -------------------------------------------------
+        // EMPTY RESPONSE
+        // -------------------------------------------------
 
-        try {
+        if (
+            !response ||
+            !response.text
+        ) {
 
-            console.log(
-                "========== GEMINI TRY =========="
+            const error = new Error(
+                "Gemini returned an empty response."
             );
 
-            console.log(
-                "Model:",
-                MODEL
-            );
-
-            console.log(
-                "Attempt:",
-                attempt
-            );
-
-            console.log(
-                "=================================="
-            );
-
-
-            // -------------------------------------------------
-            // GEMINI REQUEST
-            // -------------------------------------------------
-
-            const response =
-                await ai.models.generateContent({
-
-                    model: MODEL,
-
-                    contents: prompt,
-
-                    config: {
-
-                        responseMimeType:
-                            "application/json",
-
-                        ...(options.responseSchema
-                            ? {
-                                responseSchema:
-                                    options.responseSchema
-                            }
-                            : {})
-
-                    }
-
-                });
-
-
-            // -------------------------------------------------
-            // EMPTY RESPONSE CHECK
-            // -------------------------------------------------
-
-            if (!response) {
-
-                throw new Error(
-                    "Gemini returned no response."
-                );
-
-            }
-
-
-            const responseText =
-                typeof response.text === "function"
-                    ? response.text()
-                    : response.text;
-
-
-            if (
-                !responseText ||
-                !String(responseText).trim()
-            ) {
-
-                throw new Error(
-                    "Gemini returned an empty response."
-                );
-
-            }
-
-
-            // -------------------------------------------------
-            // SUCCESS
-            // -------------------------------------------------
-
-            console.log(
-                "========== GEMINI SUCCESS =========="
-            );
-
-            console.log(
-                "Model:",
-                MODEL
-            );
-
-            console.log(
-                "======================================"
-            );
-
-
-            return {
-                ...response,
-                text: String(responseText).trim()
-            };
-
-        } catch (error) {
-
-            lastError = error;
-
-
-            const status =
-                Number(
-                    error?.status ||
-                    error?.response?.status ||
-                    0
-                );
-
-
-            console.error(
-                "========== GEMINI ERROR =========="
-            );
-
-            console.error(
-                "Model:",
-                MODEL
-            );
-
-            console.error(
-                "Attempt:",
-                attempt
-            );
-
-            console.error(
-                "Status:",
-                status
-            );
-
-            console.error(
-                "Message:",
-                error?.message
-            );
-
-            console.error(
-                "=================================="
-            );
-
-
-            // =================================================
-            // 401
-            // =================================================
-
-            if (status === 401) {
-
-                throw getGeminiErrorMessage(error);
-
-            }
-
-
-            // =================================================
-            // 403
-            // =================================================
-
-            if (status === 403) {
-
-                throw getGeminiErrorMessage(error);
-
-            }
-
-
-            // =================================================
-            // 404
-            // =================================================
-
-            if (status === 404) {
-
-                throw getGeminiErrorMessage(error);
-
-            }
-
-
-            // =================================================
-            // 429
-            // =================================================
-            // IMPORTANT:
-            // DO NOT RETRY QUOTA ERROR
-            // =================================================
-
-            if (status === 429) {
-
-                console.error(
-                    "❌ Gemini quota exceeded."
-                );
-
-                console.error(
-                    "❌ No retry will be attempted."
-                );
-
-                throw getGeminiErrorMessage(error);
-
-            }
-
-
-            // =================================================
-            // SERVER ERRORS
-            // =================================================
-
-            const serverError =
-                status === 500 ||
-                status === 502 ||
-                status === 503 ||
-                status === 504;
-
-
-            if (
-                serverError &&
-                attempt < MAX_RETRIES
-            ) {
-
-                const delay =
-                    attempt * 3000;
-
-
-                console.log(
-                    `⚠️ Temporary Gemini server error. Retrying after ${delay}ms...`
-                );
-
-
-                await sleep(delay);
-
-                continue;
-
-            }
-
-
-            // =================================================
-            // UNKNOWN ERROR
-            // =================================================
-
-            throw getGeminiErrorMessage(error);
-
+            error.status = 500;
+            error.code =
+                "GEMINI_EMPTY_RESPONSE";
+
+            throw error;
         }
 
+
+        console.log(
+            "========== GEMINI SUCCESS =========="
+        );
+
+
+        return response;
+
+
+    } catch (error) {
+
+        console.error(
+            "========== GEMINI ERROR =========="
+        );
+
+        console.error(
+            "MODEL:",
+            GEMINI_MODEL
+        );
+
+        console.error(
+            "STATUS:",
+            error?.status
+        );
+
+        console.error(
+            "MESSAGE:",
+            error?.message
+        );
+
+
+        // =================================================
+        // 429 - QUOTA
+        // =================================================
+
+        if (
+            Number(error?.status) === 429 ||
+            error?.message?.includes(
+                "RESOURCE_EXHAUSTED"
+            ) ||
+            error?.message?.toLowerCase()
+                .includes("quota")
+        ) {
+
+            console.error(
+                "❌ GEMINI FREE QUOTA EXCEEDED"
+            );
+
+            console.error(
+                "❌ NO RETRY WILL BE ATTEMPTED"
+            );
+
+
+            const quotaError =
+                new Error(
+                    "Gemini free quota has been exceeded. Please try again after the quota resets."
+                );
+
+
+            quotaError.status = 429;
+
+            quotaError.code =
+                "GEMINI_QUOTA_EXCEEDED";
+
+
+            throw quotaError;
+        }
+
+
+        // =================================================
+        // 401 - API KEY
+        // =================================================
+
+        if (
+            Number(error?.status) === 401
+        ) {
+
+            console.error(
+                "❌ GEMINI AUTHENTICATION ERROR"
+            );
+
+
+            const authError =
+                new Error(
+                    "Gemini API key is invalid or authentication failed."
+                );
+
+
+            authError.status = 401;
+
+            authError.code =
+                "GEMINI_AUTH_ERROR";
+
+
+            throw authError;
+        }
+
+
+        // =================================================
+        // 404 - MODEL
+        // =================================================
+
+        if (
+            Number(error?.status) === 404
+        ) {
+
+            console.error(
+                "❌ GEMINI MODEL NOT AVAILABLE"
+            );
+
+
+            const modelError =
+                new Error(
+                    `Gemini model ${GEMINI_MODEL} is unavailable for this API key.`
+                );
+
+
+            modelError.status = 404;
+
+            modelError.code =
+                "GEMINI_MODEL_ERROR";
+
+
+            throw modelError;
+        }
+
+
+        // =================================================
+        // OTHER ERROR
+        // =================================================
+
+        throw error;
+
     }
-
-
-    throw getGeminiErrorMessage(
-        lastError ||
-        new Error("Gemini request failed.")
-    );
 
 }
 
@@ -563,81 +329,39 @@ async function generateInterviewReport({
 
 
     // =================================================
-    // INPUT VALIDATION
-    // =================================================
-
-    if (
-        !jobDescription ||
-        !String(jobDescription).trim()
-    ) {
-
-        throw new Error(
-            "Job description is required."
-        );
-
-    }
-
-
-    if (
-        !selfDescription ||
-        !String(selfDescription).trim()
-    ) {
-
-        throw new Error(
-            "Self description is required."
-        );
-
-    }
-
-
-    if (
-        !resume ||
-        !String(resume).trim()
-    ) {
-
-        throw new Error(
-            "Resume information is required."
-        );
-
-    }
-
-
-    // =================================================
     // PROMPT
     // =================================================
 
     const prompt = `
 
-You are an expert technical interviewer,
-career coach and recruitment specialist.
+You are an expert technical interviewer and career coach.
 
-Analyze the candidate using ONLY the information
-provided below.
+Analyze the candidate using ONLY the information provided below.
 
-========================================
+========================
 JOB DESCRIPTION
-========================================
+========================
 
-${jobDescription}
+${jobDescription || "Not provided"}
 
 
-========================================
+========================
 RESUME
-========================================
+========================
 
-${resume}
+${resume || "Not provided"}
 
 
-========================================
+========================
 SELF DESCRIPTION
-========================================
+========================
 
-${selfDescription}
+${selfDescription || "Not provided"}
 
 
-========================================
+========================
 TASK
-========================================
+========================
 
 Generate a detailed interview preparation report.
 
@@ -672,39 +396,20 @@ Use exactly this structure:
 }
 
 
-========================================
-RULES
-========================================
+RULES:
 
-1. match_score must be between 0 and 100.
-
-2. Generate exactly 10 technical interview questions.
-
-3. Generate exactly 5 behavioral interview questions.
-
-4. Generate up to 5 important missing skills.
-
-5. skill_gap_severity must correspond to missing_skills.
-
-6. Generate exactly 7 preparation plan items.
-
-7. Do NOT invent candidate experience.
-
-8. Only use information present in the resume
-   and self description.
-
-9. Tailor questions to the job description.
-
-10. Questions should be realistic for an actual
-    technical interview.
-
-11. Preparation steps should be practical.
-
-12. Return ONLY JSON.
-
-13. Do not return markdown.
-
-14. Do not return code fences.
+- match_score must be between 0 and 100.
+- Generate exactly 10 technical questions.
+- Generate exactly 5 behavioral questions.
+- Generate up to 5 missing skills.
+- skill_gap_severity must match missing_skills.
+- Generate exactly 7 preparation plan items.
+- Do not invent candidate experience.
+- Only use information from the resume and self description.
+- Tailor questions to the job description.
+- Make questions realistic for an actual interview.
+- Make preparation steps practical.
+- Return ONLY JSON.
 
 `;
 
@@ -721,26 +426,6 @@ RULES
             );
 
 
-        console.log(
-            "========== GEMINI RESPONSE RECEIVED =========="
-        );
-
-
-        console.log(
-            response.text
-        );
-
-
-        // =================================================
-        // CLEAN JSON
-        // =================================================
-
-        const cleanedJson =
-            cleanJsonResponse(
-                response.text
-            );
-
-
         // =================================================
         // PARSE JSON
         // =================================================
@@ -751,23 +436,30 @@ RULES
 
             result =
                 JSON.parse(
-                    cleanedJson
+                    response.text
                 );
 
         } catch (jsonError) {
 
             console.error(
-                "❌ GEMINI JSON PARSE ERROR"
+                "❌ GEMINI RETURNED INVALID JSON"
             );
 
             console.error(
-                cleanedJson
+                response.text
             );
 
-            throw new Error(
-                "Gemini returned invalid JSON."
-            );
+            const error =
+                new Error(
+                    "Gemini returned invalid JSON."
+                );
 
+            error.status = 500;
+
+            error.code =
+                "GEMINI_INVALID_JSON";
+
+            throw error;
         }
 
 
@@ -781,17 +473,16 @@ RULES
             )
                 ? result
                     .technical_interview_questions
-                    .filter(Boolean)
                     .map(question => ({
 
                         question:
                             String(question),
 
                         intention:
-                            "To evaluate the candidate's technical understanding and practical knowledge.",
+                            "To evaluate the candidate's technical knowledge and practical understanding.",
 
                         answer:
-                            "Explain the concept clearly, give a practical example from your project experience, and describe how you would implement it."
+                            "Explain the concept clearly and give a practical example from your project experience."
 
                     }))
                 : [];
@@ -807,7 +498,6 @@ RULES
             )
                 ? result
                     .behavioral_interview_questions
-                    .filter(Boolean)
                     .map(question => ({
 
                         question:
@@ -817,7 +507,7 @@ RULES
                             "To evaluate communication, teamwork, problem-solving and professional behavior.",
 
                         answer:
-                            "Answer using a real project or academic example. Explain the situation, your action and the result."
+                            "Answer using a real academic or project example. Explain the situation, action and result."
 
                     }))
                 : [];
@@ -831,19 +521,17 @@ RULES
             Array.isArray(
                 result.missing_skills
             )
-                ? result
-                    .missing_skills
-                    .filter(Boolean)
-                    .slice(0, 5)
+                ? result.missing_skills
                     .map((skill, index) => {
 
                         const severity =
                             String(
                                 result
-                                    .skill_gap_severity?.[index] ||
+                                    .skill_gap_severity?.[
+                                        index
+                                    ] ||
                                 "medium"
-                            )
-                                .toLowerCase();
+                            ).toLowerCase();
 
 
                         return {
@@ -856,7 +544,9 @@ RULES
                                     "low",
                                     "medium",
                                     "high"
-                                ].includes(severity)
+                                ].includes(
+                                    severity
+                                )
                                     ? severity
                                     : "medium"
 
@@ -874,10 +564,7 @@ RULES
             Array.isArray(
                 result.preparation_plan
             )
-                ? result
-                    .preparation_plan
-                    .filter(Boolean)
-                    .slice(0, 7)
+                ? result.preparation_plan
                     .map((item, index) => {
 
                         const text =
@@ -895,7 +582,9 @@ RULES
                             return {
 
                                 day:
-                                    Number(match[1]),
+                                    Number(
+                                        match[1]
+                                    ),
 
                                 focus:
                                     match[2]
@@ -930,7 +619,7 @@ RULES
 
 
         // =================================================
-        // MATCH SCORE
+        // FINAL REPORT
         // =================================================
 
         let matchScore =
@@ -940,7 +629,7 @@ RULES
 
 
         if (
-            !Number.isFinite(matchScore)
+            Number.isNaN(matchScore)
         ) {
 
             matchScore = 0;
@@ -948,34 +637,27 @@ RULES
         }
 
 
-        matchScore =
-            Math.max(
-                0,
-                Math.min(
-                    100,
-                    matchScore
-                )
-            );
+        if (matchScore < 0) {
+
+            matchScore = 0;
+
+        }
 
 
-        // =================================================
-        // TITLE
-        // =================================================
+        if (matchScore > 100) {
 
-        const title =
-            String(
-                result.job_role ||
-                "Interview Preparation Plan"
-            );
+            matchScore = 100;
 
+        }
 
-        // =================================================
-        // FINAL REPORT
-        // =================================================
 
         const interviewReport = {
 
-            title,
+            title:
+                typeof result.job_role === "string" &&
+                result.job_role.trim()
+                    ? result.job_role.trim()
+                    : "Interview Preparation Plan",
 
             matchScore,
 
@@ -1001,21 +683,7 @@ RULES
 
 
         console.log(
-            "========== FINAL INTERVIEW REPORT =========="
-        );
-
-
-        console.log(
-            JSON.stringify(
-                validatedReport,
-                null,
-                2
-            )
-        );
-
-
-        console.log(
-            "=============================================="
+            "========== REPORT GENERATED =========="
         );
 
 
@@ -1025,15 +693,7 @@ RULES
     } catch (error) {
 
         console.error(
-            "=============================================="
-        );
-
-        console.error(
-            "GENERATE INTERVIEW REPORT ERROR"
-        );
-
-        console.error(
-            "=============================================="
+            "========== AI GENERATION ERROR =========="
         );
 
         console.error(
@@ -1052,12 +712,8 @@ RULES
         );
 
         console.error(
-            "STACK:",
-            error?.stack
-        );
-
-        console.error(
-            "=============================================="
+            "CODE:",
+            error?.code
         );
 
 
@@ -1076,26 +732,10 @@ async function generatePdfFromHtml(
     htmlContent
 ) {
 
-    let browser = null;
+    let browser;
 
 
     try {
-
-        if (
-            !htmlContent ||
-            !String(htmlContent).trim()
-        ) {
-
-            throw new Error(
-                "HTML content is empty."
-            );
-
-        }
-
-
-        // =================================================
-        // LAUNCH PUPPETEER
-        // =================================================
 
         browser =
             await puppeteer.launch({
@@ -1103,35 +743,20 @@ async function generatePdfFromHtml(
                 headless: true,
 
                 args: [
-
                     "--no-sandbox",
-
-                    "--disable-setuid-sandbox",
-
-                    "--disable-dev-shm-usage",
-
-                    "--disable-gpu"
-
+                    "--disable-setuid-sandbox"
                 ]
 
             });
 
 
-        // =================================================
-        // PAGE
-        // =================================================
-
         const page =
             await browser.newPage();
 
 
-        // =================================================
-        // HTML
-        // =================================================
-
         await page.setContent(
 
-            String(htmlContent),
+            htmlContent,
 
             {
                 waitUntil:
@@ -1140,10 +765,6 @@ async function generatePdfFromHtml(
 
         );
 
-
-        // =================================================
-        // PDF
-        // =================================================
 
         const pdfBuffer =
             await page.pdf({
@@ -1173,71 +794,14 @@ async function generatePdfFromHtml(
             });
 
 
-        if (
-            !pdfBuffer ||
-            pdfBuffer.length === 0
-        ) {
-
-            throw new Error(
-                "Puppeteer generated an empty PDF."
-            );
-
-        }
-
-
-        console.log(
-            "✅ PDF generated successfully."
-        );
-
-
         return pdfBuffer;
-
-
-    } catch (error) {
-
-        console.error(
-            "========== PDF GENERATION ERROR =========="
-        );
-
-        console.error(
-            "NAME:",
-            error?.name
-        );
-
-        console.error(
-            "MESSAGE:",
-            error?.message
-        );
-
-        console.error(
-            "STACK:",
-            error?.stack
-        );
-
-
-        throw error;
 
 
     } finally {
 
-        // =================================================
-        // CLOSE BROWSER
-        // =================================================
-
         if (browser) {
 
-            try {
-
-                await browser.close();
-
-            } catch (closeError) {
-
-                console.error(
-                    "Puppeteer browser close error:",
-                    closeError?.message
-                );
-
-            }
+            await browser.close();
 
         }
 
@@ -1260,90 +824,62 @@ async function generateResumePdf({
 
 }) {
 
-    // =================================================
-    // VALIDATION
-    // =================================================
+    console.log(
+        "=============================================="
+    );
 
-    if (
-        !resume ||
-        !String(resume).trim()
-    ) {
+    console.log(
+        "GENERATE RESUME PDF"
+    );
 
-        throw new Error(
-            "Resume information is required."
-        );
+    console.log(
+        "=============================================="
+    );
 
-    }
-
-
-    // =================================================
-    // PROMPT
-    // =================================================
 
     const prompt = `
 
-You are an expert professional resume writer.
-
 Create a professional ATS-friendly resume.
 
-========================================
-JOB DESCRIPTION
-========================================
+JOB DESCRIPTION:
 
 ${jobDescription || "Not provided"}
 
 
-========================================
-CURRENT RESUME
-========================================
+CURRENT RESUME:
 
 ${resume || "Not provided"}
 
 
-========================================
-SELF DESCRIPTION
-========================================
+SELF DESCRIPTION:
 
 ${selfDescription || "Not provided"}
 
 
-========================================
-REQUIREMENTS
-========================================
+REQUIREMENTS:
 
 - Tailor the resume to the job description.
-- Do NOT invent information.
-- Do NOT invent companies.
-- Do NOT invent job titles.
-- Do NOT invent education.
-- Do NOT invent skills that are not supported.
-- Keep the content professional.
+- Do not invent information.
+- Use only information provided.
+- Keep it professional.
 - Keep it concise.
 - Prefer 1-2 pages.
 - Use simple HTML.
-- Make it ATS-friendly.
 - Use proper headings.
 - Highlight relevant technical skills.
-- Include projects only when provided.
-- Include experience only when provided.
-- Return ONLY valid JSON.
-- JSON must contain exactly one field named "html".
-- Do NOT return markdown.
-- Do NOT return code fences.
+- Include projects and experience only when provided.
+- Return ONLY JSON.
+
+JSON format:
+
+{
+    "html": "..."
+}
 
 `;
 
 
     try {
-
-        console.log(
-            "========== GENERATING RESUME PDF =========="
-        );
-
-
-        // =================================================
-        // GEMINI
-        // =================================================
 
         const response =
             await generateGeminiContent(
@@ -1362,20 +898,6 @@ REQUIREMENTS
             );
 
 
-        // =================================================
-        // CLEAN JSON
-        // =================================================
-
-        const cleanedJson =
-            cleanJsonResponse(
-                response.text
-            );
-
-
-        // =================================================
-        // PARSE JSON
-        // =================================================
-
         let jsonContent;
 
 
@@ -1383,29 +905,25 @@ REQUIREMENTS
 
             jsonContent =
                 JSON.parse(
-                    cleanedJson
+                    response.text
                 );
 
         } catch (jsonError) {
 
-            console.error(
-                "❌ RESUME JSON PARSE ERROR"
-            );
+            const error =
+                new Error(
+                    "Gemini returned invalid resume JSON."
+                );
 
-            console.error(
-                cleanedJson
-            );
+            error.status = 500;
 
-            throw new Error(
-                "Gemini returned invalid resume JSON."
-            );
+            error.code =
+                "GEMINI_INVALID_RESUME_JSON";
+
+            throw error;
 
         }
 
-
-        // =================================================
-        // ZOD VALIDATION
-        // =================================================
 
         const validatedContent =
             resumePdfSchema.parse(
@@ -1413,31 +931,10 @@ REQUIREMENTS
             );
 
 
-        // =================================================
-        // GENERATE PDF
-        // =================================================
-
         const pdfBuffer =
             await generatePdfFromHtml(
                 validatedContent.html
             );
-
-
-        if (
-            !pdfBuffer ||
-            pdfBuffer.length === 0
-        ) {
-
-            throw new Error(
-                "Resume PDF buffer is empty."
-            );
-
-        }
-
-
-        console.log(
-            "========== RESUME PDF SUCCESS =========="
-        );
 
 
         return pdfBuffer;
@@ -1446,20 +943,7 @@ REQUIREMENTS
     } catch (error) {
 
         console.error(
-            "=============================================="
-        );
-
-        console.error(
-            "RESUME PDF GENERATION ERROR"
-        );
-
-        console.error(
-            "=============================================="
-        );
-
-        console.error(
-            "NAME:",
-            error?.name
+            "========== RESUME PDF ERROR =========="
         );
 
         console.error(
@@ -1473,17 +957,11 @@ REQUIREMENTS
         );
 
         console.error(
-            "STACK:",
-            error?.stack
-        );
-
-        console.error(
-            "=============================================="
+            "CODE:",
+            error?.code
         );
 
 
-        // IMPORTANT:
-        // Don't hide the original error.
         throw error;
 
     }
